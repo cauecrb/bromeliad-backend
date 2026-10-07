@@ -1,0 +1,51 @@
+# Ambiente local de desenvolvimento/teste.
+#
+# Propósito: rodar tudo isolado na sua máquina, sem gastar cota do
+# Supabase de produção nem depender de internet. O Postgres aqui é
+# só um "espelho" local — mesma engine (Postgres), mesmos tipos
+# (UUID, JSONB) que usamos nos models, então o comportamento é
+# idêntico ao do Supabase quando for a hora de subir pra produção.
+#
+# Trocar de ambiente é só trocar a variável DATABASE_URL — nenhum
+# código muda entre local e produção.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bromeliads
+      POSTGRES_PASSWORD: bromeliads
+      POSTGRES_DB: bromeliads
+    ports:
+      - "5432:5432"
+    volumes:
+      - bromeliads_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bromeliads"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Aponta pro Postgres local do compose, não pro Supabase.
+      DATABASE_URL: postgresql+psycopg2://bromeliads:bromeliads@db:5432/bromeliads
+      DEBUG: "true"
+    volumes:
+      # Monta o código local dentro do container — dá pra editar
+      # fora e ver refletido sem rebuildar a imagem toda vez.
+      - ./app:/app/app
+      # Sem isso, uma migration gerada pelo `alembic revision --autogenerate`
+      # dentro do container ficaria presa lá e sumiria no próximo rebuild.
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  bromeliads_db_data:
